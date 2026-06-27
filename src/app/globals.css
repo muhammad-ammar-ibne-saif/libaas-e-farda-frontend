@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Variables (overridden by ThemeProvider) ─────────────────────────── */
+:root {
+  --color-primary:        #C4622D;
+  --color-primary-hover:  #b54e22;
+  --color-primary-light:  #fdf3ee;
+  --color-background:     #F5F0E8;
+  --color-background-alt: #ede4d4;
+  --color-secondary:      #8FAF8A;
+  --color-dark:           #2D2D2D;
+  --color-dark-light:     #4a4a4a;
+  --color-text-primary:   #2D2D2D;
+  --color-text-secondary: #6b6b6b;
+  --color-text-light:     #9a9a9a;
+  --color-nav-bg:         #F5F0E8;
+  --color-nav-scroll-bg:  rgba(245,240,232,0.95);
+  --color-footer-bg:      #2D2D2D;
+  --color-footer-text:    #F5F0E8;
+  --color-card-bg:        #F5F0E8;
+  --color-card-border:    #ede4d4;
+  --color-btn-bg:         #2D2D2D;
+  --color-btn-text:       #F5F0E8;
+  --color-btn-hover-bg:   #C4622D;
+  --color-scrollbar:      #C4622D;
+  --color-scrollbar-bg:   #F5F0E8;
+  --border-radius:        0px;
+  --button-radius:        0px;
+  --transition:           300ms;
+  --font-display:         'Cormorant Garamond', Georgia, serif;
+  --font-body:            'DM Sans', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-scrollbar-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-scrollbar); border-radius: 3px; }
+
+/* ── Grain overlay ───────────────────────────────────────────────────────── */
+.grain::after {
+  content: ''; position: absolute; inset: 0;
+  pointer-events: none; z-index: 1; opacity: 0.03;
+}
+
+/* ── Prose styles for blog content ──────────────────────────────────────── */
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  font-family: var(--font-display); font-weight: 300; margin: 1.5em 0 0.5em;
+  color: var(--color-text-primary);
+}
+.prose h2 { font-size: 1.75rem; }
+.prose h3 { font-size: 1.4rem; }
+.prose p  { margin: 1em 0; line-height: 1.75; }
+.prose ul, .prose ol { padding-left: 1.5rem; margin: 1em 0; }
+.prose li { margin: 0.4em 0; line-height: 1.6; }
+.prose img { width: 100%; border-radius: 4px; margin: 1.5em 0; }
+.prose blockquote {
+  border-left: 3px solid var(--color-primary); padding-left: 1rem;
+  margin: 1.5em 0; font-style: italic; color: var(--color-text-secondary);
+}
+.prose a { color: var(--color-primary); }
+.prose strong { font-weight: 600; }
+.prose hr { border-color: var(--color-background-alt); margin: 2em 0; }
+
+/* ── Utility components ──────────────────────────────────────────────────── */
+@layer components {
+  .btn-primary {
+    @apply px-8 py-3 font-body font-medium tracking-widest text-xs uppercase transition-all duration-300 active:scale-95;
+    background-color: var(--color-btn-bg);
+    color: var(--color-btn-text);
+    border-radius: var(--button-radius);
+  }
+  .btn-primary:hover {
+    background-color: var(--color-btn-hover-bg);
+    color: var(--color-btn-text);
+  }
+
+  .btn-outline {
+    @apply px-8 py-3 font-body font-medium tracking-widest text-xs uppercase transition-all duration-300;
+    border: 1px solid var(--color-primary);
+    color: var(--color-primary);
+    border-radius: var(--button-radius);
+  }
+  .btn-outline:hover {
+    background-color: var(--color-primary);
+    color: var(--color-btn-text);
+  }
+
+  .section-title {
+    @apply font-display text-4xl md:text-5xl font-light leading-tight;
+    color: var(--color-text-primary);
+  }
+
+  .card-hover {
+    @apply transition-all duration-500 hover:shadow-card-hover hover:-translate-y-1;
+  }
+}
+
+/* ── Admin scrollbar (cleaner, grey) ─────────────────────────────────────── */
+.admin-layout * ::-webkit-scrollbar       { width: 5px; height: 5px; }
+.admin-layout * ::-webkit-scrollbar-track { background: #f3f4f6; }
+.admin-layout * ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+.admin-layout * ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Admin body scrollbar */
+body:has(.admin-layout) ::-webkit-scrollbar       { width: 5px; }
+body:has(.admin-layout) ::-webkit-scrollbar-track { background: #f9fafb; }
+body:has(.admin-layout) ::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+body:has(.admin-layout) ::-webkit-scrollbar-thumb:hover { background: #C4622D; }
