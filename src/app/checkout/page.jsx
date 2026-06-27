@@ -1,678 +1,629 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useCartStore } from "../../store/cartStore";
 import { useSettingsStore } from "../../store/settingsStore";
-import { formatPrice, cities, generateOrderNumber } from "../../lib/utils";
 import { createOrder, validateCoupon } from "../../lib/api";
+import { formatPrice } from "../../lib/utils";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Tag,
+  X,
+  CreditCard,
+  Loader,
+} from "lucide-react";
 import Link from "next/link";
-import { ArrowLeft, ShoppingBag, CheckCircle, Tag, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 
-export default function CheckoutPage() {
-  const router = useRouter();
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api";
+const inp =
+  "w-full border border-ivory-300 focus:border-charcoal bg-ivory-50 px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors";
+
+const PAYMENT_ICONS = {
+  cod: "💵",
+  jazzcash: "📱",
+  easypaisa: "📱",
+  bank: "🏦",
+  stripe: "💳",
+};
+
+function CheckoutContent() {
   const { items, total, clearCart } = useCartStore();
-  const { settings, fetch: fetchSettings } = useSettingsStore();
+  const { settings, fetch } = useSettingsStore();
+  const router = useRouter();
   const cartTotal = total();
+  const cartItems = items;
 
   const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [order, setOrder] = useState(null);
-  const [shipping, setShipping] = useState("standard");
-
-  // Coupon state
-  const [couponCode, setCouponCode] = useState("");
-  const [couponInput, setCouponInput] = useState("");
-  const [couponDiscount, setCouponDiscount] = useState(0);
-  const [couponMsg, setCouponMsg] = useState("");
-  const [couponLoading, setCouponLoading] = useState(false);
-  const [couponError, setCouponError] = useState("");
-
+  const [placing, setPlacing] = useState(false);
+  const [error, setError] = useState("");
+  const [coupon, setCoupon] = useState({
+    code: "",
+    discount: 0,
+    applied: false,
+    loading: false,
+    error: "",
+  });
   const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
+    name: "",
     email: "",
     phone: "",
-    address: "",
+    street: "",
     city: "",
     province: "",
-    postalCode: "",
+    shippingOption: "standard",
     paymentMethod: "cod",
     notes: "",
   });
-  const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    fetchSettings();
+    fetch();
   }, []);
+  useEffect(() => {
+    if (cartItems.length === 0) router.push("/shop");
+  }, [cartItems]);
 
-  // Dynamic payment methods from settings
-  const paymentMethods = settings?.paymentMethods?.filter(
+  const upd = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const paymentMethods = (settings?.paymentMethods || []).filter(
     (m) => m.isActive
-  ) || [
-    {
-      key: "cod",
-      label: "Cash on Delivery",
-      description: "Pay when your order arrives",
-      icon: "💵",
-    },
-    {
-      key: "jazzcash",
-      label: "JazzCash",
-      description: "Pay with your JazzCash account",
-      icon: "📱",
-    },
-    {
-      key: "easypaisa",
-      label: "Easypaisa",
-      description: "Pay with your Easypaisa account",
-      icon: "💳",
-    },
-  ];
-
-  const shippingSettings = settings?.shipping || {};
-  const freeThreshold = shippingSettings.freeShippingThreshold || 4000;
-  const shippingRates = {
-    standard: {
-      label: `Standard (3-5 days)`,
-      price: shippingSettings.standardCost || 199,
-    },
-    express: {
-      label: `Express (1-2 days)`,
-      price: shippingSettings.expressCost || 349,
-    },
-    lahore: {
-      label: `Same Day (${shippingSettings.sameDayCity || "Lahore"})`,
-      price: shippingSettings.sameDayCost || 249,
-    },
-  };
-
+  );
+  const threshold = settings?.shipping?.freeShippingThreshold || 4000;
+  const standardRate = settings?.shipping?.standardCost || 199;
+  const expressRate = settings?.shipping?.expressCost || 349;
   const shippingCost =
-    cartTotal >= freeThreshold ? 0 : shippingRates[shipping]?.price || 199;
-  const orderTotal = cartTotal + shippingCost - couponDiscount;
-
-  const update = (field, value) => {
-    setForm((f) => ({ ...f, [field]: value }));
-    if (errors[field]) setErrors((e) => ({ ...e, [field]: "" }));
-  };
-
-  const validate = () => {
-    const e = {};
-    if (!form.firstName.trim()) e.firstName = "Required";
-    if (!form.lastName.trim()) e.lastName = "Required";
-    if (!form.phone.trim()) e.phone = "Required";
-    if (!form.address.trim()) e.address = "Required";
-    if (!form.city) e.city = "Required";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))
-      e.email = "Enter a valid email";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
+    cartTotal >= threshold
+      ? 0
+      : form.shippingOption === "express"
+      ? expressRate
+      : standardRate;
+  const finalTotal = cartTotal + shippingCost - coupon.discount;
 
   const applyCoupon = async () => {
-    if (!couponInput.trim()) return;
-    setCouponLoading(true);
-    setCouponError("");
+    if (!coupon.code.trim()) return;
+    setCoupon((c) => ({ ...c, loading: true, error: "" }));
     try {
-      const data = await validateCoupon(couponInput, cartTotal);
-      if (data.success) {
-        setCouponCode(couponInput.toUpperCase());
-        setCouponDiscount(data.discount);
-        setCouponMsg(data.message);
-        setCouponError("");
-      } else {
-        setCouponError(data.message || "Invalid coupon");
-        setCouponDiscount(0);
-        setCouponCode("");
-      }
+      const data = await validateCoupon(coupon.code, cartTotal);
+      if (data.success)
+        setCoupon((c) => ({
+          ...c,
+          discount: data.discount,
+          applied: true,
+          loading: false,
+        }));
+      else setCoupon((c) => ({ ...c, error: data.message, loading: false }));
     } catch {
-      setCouponError("Could not validate coupon");
-    } finally {
-      setCouponLoading(false);
+      setCoupon((c) => ({
+        ...c,
+        error: "Could not validate coupon",
+        loading: false,
+      }));
     }
   };
 
-  const removeCoupon = () => {
-    setCouponCode("");
-    setCouponDiscount(0);
-    setCouponMsg("");
-    setCouponInput("");
-  };
+  const buildOrderPayload = () => ({
+    items: cartItems.map((item) => ({
+      productId: item.product._id || item.product.id,
+      name: item.product.name,
+      price: item.product.salePrice || item.product.price,
+      image: item.color?.image || item.product.images?.[0] || "",
+      size: item.size || "",
+      color: item.color?.name || "Default",
+      quantity: item.quantity,
+    })),
+    customer: { name: form.name, email: form.email, phone: form.phone },
+    shippingAddress: {
+      street: form.street,
+      city: form.city,
+      province: form.province,
+    },
+    shippingOption: form.shippingOption,
+    paymentMethod: form.paymentMethod,
+    couponCode: coupon.applied ? coupon.code : "",
+    notes: form.notes,
+  });
 
   const placeOrder = async () => {
-    if (!validate()) return;
-    setLoading(true);
+    setPlacing(true);
+    setError("");
     try {
-      const orderData = {
-        customer: {
-          name: `${form.firstName} ${form.lastName}`,
-          email: form.email,
-          phone: form.phone,
-        },
-        shippingAddress: {
-          street: form.address,
-          city: form.city,
-          province: form.province,
-          postalCode: form.postalCode,
-        },
-        items: items.map((item) => ({
-          productId: item.product._id || item.product.id,
-          name: item.product.name,
-          price: item.product.salePrice || item.product.price,
-          image: item.color?.image || item.product.images?.[0] || "",
-          size: item.size || "",
-          color: item.color?.name || "Default",
-          quantity: item.quantity,
-        })),
-        paymentMethod: form.paymentMethod,
-        shippingOption: shipping,
-        couponCode: couponCode || undefined,
-        notes: form.notes,
-      };
-
-      const data = await createOrder(orderData);
-      if (data.success) {
-        setOrder({
-          ...data.order,
-          customerName: form.firstName,
-          email: form.email,
-          items,
-          total: orderTotal,
+      // ── Stripe Card Payment ───────────────────────────────
+      if (form.paymentMethod === "stripe") {
+        const res = await fetch(`${API}/payments/create-checkout`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildOrderPayload()),
         });
+        const data = await res.json();
+        if (data.success && data.url) {
+          // Redirect to Stripe hosted checkout
+          window.location.href = data.url;
+          return;
+        }
+        throw new Error(data.message || "Could not create Stripe session");
+      }
+
+      // ── All other payment methods (COD, JazzCash etc.) ───
+      const data = await createOrder(buildOrderPayload());
+      if (data.success) {
         clearCart();
-        setStep(3);
+        router.push(`/orders?order=${data.orderNumber}`);
       } else {
-        alert(data.message || "Order failed. Please try again.");
+        throw new Error(data.message || "Could not place order");
       }
     } catch (e) {
-      alert("Something went wrong. Please try again.");
+      setError(e.message);
     } finally {
-      setLoading(false);
+      setPlacing(false);
     }
   };
 
-  if (items.length === 0 && step < 3) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 px-6">
-        <ShoppingBag size={48} className="text-ivory-300" />
-        <p className="font-display text-3xl text-charcoal">Your bag is empty</p>
-        <Link href="/shop" className="btn-primary">
-          Continue Shopping
-        </Link>
-      </div>
-    );
-  }
+  const validateStep1 = () => {
+    if (!form.name.trim()) return setError("Please enter your name");
+    if (!form.email.trim()) return setError("Please enter your email");
+    if (!form.phone.trim()) return setError("Please enter your phone number");
+    if (!form.street.trim()) return setError("Please enter your address");
+    if (!form.city.trim()) return setError("Please enter your city");
+    setError("");
+    setStep(2);
+  };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
-      <div className="mb-10">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-8">
         <Link
           href="/shop"
-          className="inline-flex items-center gap-1.5 text-xs font-body text-charcoal-light hover:text-terracotta-500 transition-colors mb-6"
+          className="text-charcoal-light hover:text-charcoal transition-colors"
         >
-          <ArrowLeft size={12} /> Continue Shopping
+          <ArrowLeft size={18} />
         </Link>
-        <div className="flex items-center gap-0 max-w-sm">
-          {["Details", "Payment", "Confirmed"].map((s, i) => (
-            <div key={s} className="flex items-center flex-1 last:flex-none">
+        <h1 className="font-display text-3xl text-charcoal font-light">
+          Checkout
+        </h1>
+        <div className="flex items-center gap-2 ml-auto">
+          {[1, 2].map((s) => (
+            <div
+              key={s}
+              className={`flex items-center gap-2 text-xs font-body ${
+                step === s
+                  ? "text-terracotta-500 font-semibold"
+                  : "text-charcoal-light"
+              }`}
+            >
               <div
-                className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-body font-medium transition-colors ${
-                  step > i
-                    ? "bg-terracotta-500 text-ivory-100"
-                    : step === i + 1
-                    ? "bg-charcoal text-ivory-100"
+                className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                  step === s
+                    ? "bg-terracotta-500 text-white"
+                    : step > s
+                    ? "bg-sage-400 text-white"
                     : "bg-ivory-200 text-charcoal-light"
-                }`}
-              >
-                {step > i ? "✓" : i + 1}
-              </div>
-              <div
-                className={`text-[10px] font-body ml-1.5 ${
-                  step === i + 1
-                    ? "text-charcoal font-medium"
-                    : "text-charcoal-light"
                 }`}
               >
                 {s}
               </div>
-              {i < 2 && (
-                <div
-                  className={`flex-1 h-px mx-3 ${
-                    step > i + 1 ? "bg-terracotta-500" : "bg-ivory-200"
-                  }`}
-                />
-              )}
+              <span className="hidden sm:inline">
+                {s === 1 ? "Details" : "Payment"}
+              </span>
+              {s < 2 && <ArrowRight size={12} className="text-ivory-300" />}
             </div>
           ))}
         </div>
       </div>
 
-      {/* ORDER CONFIRMED */}
-      {step === 3 && order && (
-        <div className="max-w-lg mx-auto text-center py-10">
-          <div className="w-16 h-16 bg-sage-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <CheckCircle size={32} className="text-sage-400" />
-          </div>
-          <p className="font-body text-xs tracking-[0.3em] uppercase text-sage-400 mb-3">
-            Order Confirmed
-          </p>
-          <h1 className="font-display text-4xl text-charcoal mb-4">
-            Thank you, {order.customerName}!
-          </h1>
-          <p className="font-body text-sm text-charcoal-light mb-2">
-            Order{" "}
-            <span className="font-medium text-charcoal">
-              #{order.orderNumber}
-            </span>{" "}
-            placed successfully.
-          </p>
-          <p className="font-body text-sm text-charcoal-light mb-8">
-            Confirmation sent to{" "}
-            <span className="text-charcoal">{order.email}</span>.
-          </p>
-          <div className="flex gap-3 justify-center">
-            <Link href="/shop" className="btn-primary">
-              Shop More
-            </Link>
-            <Link href="/orders" className="btn-outline">
-              Track Order
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {/* CHECKOUT FORM */}
-      {step < 3 && (
-        <div className="grid lg:grid-cols-[1fr_380px] gap-10">
-          <div className="space-y-8">
-            {/* Step 1 */}
-            {step === 1 && (
-              <div className="space-y-6">
-                <h2 className="font-display text-2xl text-charcoal">
-                  Delivery Details
-                </h2>
-                <div className="grid grid-cols-2 gap-4">
-                  {["firstName", "lastName"].map((f) => (
-                    <div key={f}>
-                      <label className="block text-xs font-body tracking-wider text-charcoal-light mb-1.5 capitalize">
-                        {f === "firstName" ? "First Name" : "Last Name"}
-                      </label>
-                      <input
-                        value={form[f]}
-                        onChange={(e) => update(f, e.target.value)}
-                        className={`w-full bg-ivory-50 border px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors ${
-                          errors[f]
-                            ? "border-terracotta-400"
-                            : "border-ivory-300 focus:border-charcoal"
-                        }`}
-                      />
-                      {errors[f] && (
-                        <p className="text-terracotta-500 text-xs mt-1">
-                          {errors[f]}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {[
-                  {
-                    f: "email",
-                    label: "Email Address",
-                    type: "email",
-                    ph: "you@example.com",
-                  },
-                  {
-                    f: "phone",
-                    label: "Phone Number",
-                    type: "tel",
-                    ph: "03XX-XXXXXXX",
-                  },
-                  {
-                    f: "address",
-                    label: "Street Address",
-                    type: "text",
-                    ph: "House #, Street, Area",
-                  },
-                ].map(({ f, label, type, ph }) => (
-                  <div key={f}>
-                    <label className="block text-xs font-body tracking-wider text-charcoal-light mb-1.5">
-                      {label}
-                    </label>
-                    <input
-                      type={type}
-                      value={form[f]}
-                      onChange={(e) => update(f, e.target.value)}
-                      placeholder={ph}
-                      className={`w-full bg-ivory-50 border px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors ${
-                        errors[f]
-                          ? "border-terracotta-400"
-                          : "border-ivory-300 focus:border-charcoal"
-                      }`}
-                    />
-                    {errors[f] && (
-                      <p className="text-terracotta-500 text-xs mt-1">
-                        {errors[f]}
-                      </p>
-                    )}
-                  </div>
-                ))}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-body tracking-wider text-charcoal-light mb-1.5">
-                      City
-                    </label>
-                    <select
-                      value={form.city}
-                      onChange={(e) => update("city", e.target.value)}
-                      className={`w-full bg-ivory-50 border px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors ${
-                        errors.city
-                          ? "border-terracotta-400"
-                          : "border-ivory-300 focus:border-charcoal"
-                      }`}
-                    >
-                      <option value="">Select city</option>
-                      {cities.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    {errors.city && (
-                      <p className="text-terracotta-500 text-xs mt-1">
-                        {errors.city}
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs font-body tracking-wider text-charcoal-light mb-1.5">
-                      Postal Code
-                    </label>
-                    <input
-                      value={form.postalCode}
-                      onChange={(e) => update("postalCode", e.target.value)}
-                      placeholder="54000"
-                      className="w-full bg-ivory-50 border border-ivory-300 focus:border-charcoal px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* Shipping */}
+      <div className="grid lg:grid-cols-5 gap-8">
+        {/* Form */}
+        <div className="lg:col-span-3 space-y-6">
+          {/* Step 1: Address */}
+          {step === 1 && (
+            <div className="bg-ivory-50 border border-ivory-200 p-6 space-y-4">
+              <h2 className="font-display text-xl text-charcoal">
+                Delivery Details
+              </h2>
+              <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-body tracking-widest uppercase text-charcoal-light mb-3">
-                    Shipping Method
+                  <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                    Full Name *
                   </label>
-                  <div className="space-y-2">
-                    {Object.entries(shippingRates).map(([key, rate]) => (
-                      <label
-                        key={key}
-                        className={`flex items-center justify-between p-4 border cursor-pointer transition-colors ${
-                          shipping === key
-                            ? "border-charcoal bg-ivory-50"
-                            : "border-ivory-200 hover:border-ivory-300"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="radio"
-                            name="shipping"
-                            value={key}
-                            checked={shipping === key}
-                            onChange={() => setShipping(key)}
-                            className="accent-terracotta-500"
-                          />
-                          <p className="font-body text-sm text-charcoal">
-                            {rate.label}
-                          </p>
-                        </div>
-                        <span className="font-body text-sm font-medium text-charcoal">
-                          {cartTotal >= freeThreshold ? (
-                            <span className="text-sage-400">Free</span>
-                          ) : (
-                            formatPrice(rate.price)
-                          )}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Coupon */}
-                <div>
-                  <label className="block text-xs font-body tracking-widest uppercase text-charcoal-light mb-3">
-                    Coupon Code
-                  </label>
-                  {couponCode ? (
-                    <div className="flex items-center justify-between bg-sage-50 border border-sage-200 px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <Tag size={14} className="text-sage-400" />
-                        <span className="font-mono text-sm font-medium text-charcoal">
-                          {couponCode}
-                        </span>
-                        <span className="text-xs text-sage-600">
-                          {couponMsg}
-                        </span>
-                      </div>
-                      <button
-                        onClick={removeCoupon}
-                        className="text-charcoal-light hover:text-red-500 transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex gap-0">
-                      <input
-                        value={couponInput}
-                        onChange={(e) =>
-                          setCouponInput(e.target.value.toUpperCase())
-                        }
-                        placeholder="Enter coupon code"
-                        onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
-                        className="flex-1 bg-ivory-50 border border-ivory-300 focus:border-charcoal px-4 py-3 text-sm font-body font-mono text-charcoal outline-none transition-colors uppercase"
-                      />
-                      <button
-                        onClick={applyCoupon}
-                        disabled={couponLoading}
-                        className="bg-charcoal text-ivory-100 px-5 text-xs font-body tracking-widest uppercase hover:bg-terracotta-500 transition-colors disabled:opacity-60"
-                      >
-                        {couponLoading ? "..." : "Apply"}
-                      </button>
-                    </div>
-                  )}
-                  {couponError && (
-                    <p className="text-terracotta-500 text-xs mt-1">
-                      {couponError}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-body tracking-wider text-charcoal-light mb-1.5">
-                    Order Notes (Optional)
-                  </label>
-                  <textarea
-                    value={form.notes}
-                    onChange={(e) => update("notes", e.target.value)}
-                    rows={3}
-                    className="w-full bg-ivory-50 border border-ivory-300 focus:border-charcoal px-4 py-3 text-sm font-body text-charcoal outline-none transition-colors resize-none"
+                  <input
+                    value={form.name}
+                    onChange={(e) => upd("name", e.target.value)}
+                    placeholder="Ayesha Raza"
+                    className={inp}
                   />
                 </div>
-
-                <button
-                  onClick={() => validate() && setStep(2)}
-                  className="btn-primary w-full"
-                >
-                  Continue to Payment
-                </button>
-              </div>
-            )}
-
-            {/* Step 2 */}
-            {step === 2 && (
-              <div className="space-y-6">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setStep(1)}
-                    className="p-1 text-charcoal-light hover:text-terracotta-500 transition-colors"
-                  >
-                    <ArrowLeft size={16} />
-                  </button>
-                  <h2 className="font-display text-2xl text-charcoal">
-                    Payment Method
-                  </h2>
+                <div>
+                  <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                    Phone *
+                  </label>
+                  <input
+                    value={form.phone}
+                    onChange={(e) => upd("phone", e.target.value)}
+                    placeholder="0300-1234567"
+                    className={inp}
+                  />
                 </div>
-                <div className="space-y-3">
-                  {paymentMethods.map((method) => (
+              </div>
+              <div>
+                <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                  Email *
+                </label>
+                <input
+                  type="email"
+                  value={form.email}
+                  onChange={(e) => upd("email", e.target.value)}
+                  placeholder="you@example.com"
+                  className={inp}
+                />
+              </div>
+              <div>
+                <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                  Street Address *
+                </label>
+                <input
+                  value={form.street}
+                  onChange={(e) => upd("street", e.target.value)}
+                  placeholder="House/Flat No, Street"
+                  className={inp}
+                />
+              </div>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                    City *
+                  </label>
+                  <input
+                    value={form.city}
+                    onChange={(e) => upd("city", e.target.value)}
+                    placeholder="London"
+                    className={inp}
+                  />
+                </div>
+                <div>
+                  <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                    County / State
+                  </label>
+                  <input
+                    value={form.province}
+                    onChange={(e) => upd("province", e.target.value)}
+                    placeholder="Greater London"
+                    className={inp}
+                  />
+                </div>
+              </div>
+
+              {/* Shipping option */}
+              <div>
+                <label className="font-body text-xs text-charcoal-light block mb-2">
+                  Shipping Method
+                </label>
+                <div className="space-y-2">
+                  {[
+                    {
+                      k: "standard",
+                      l:
+                        settings?.shipping?.standardLabel ||
+                        "Standard (3–5 days)",
+                      p:
+                        cartTotal >= threshold
+                          ? "Free"
+                          : `${formatPrice(standardRate)}`,
+                    },
+                    {
+                      k: "express",
+                      l:
+                        settings?.shipping?.expressLabel ||
+                        "Express (1–2 days)",
+                      p: formatPrice(expressRate),
+                    },
+                  ].map((opt) => (
                     <label
-                      key={method.key}
-                      className={`flex items-center gap-4 p-4 border cursor-pointer transition-all ${
-                        form.paymentMethod === method.key
-                          ? "border-charcoal bg-ivory-50"
-                          : "border-ivory-200 hover:border-ivory-300"
+                      key={opt.k}
+                      className={`flex items-center justify-between p-3 border cursor-pointer transition-colors ${
+                        form.shippingOption === opt.k
+                          ? "border-charcoal bg-ivory-100"
+                          : "border-ivory-300 hover:border-ivory-400"
                       }`}
                     >
-                      <input
-                        type="radio"
-                        name="payment"
-                        value={method.key}
-                        checked={form.paymentMethod === method.key}
-                        onChange={() => update("paymentMethod", method.key)}
-                        className="accent-terracotta-500"
-                      />
-                      <span className="text-xl">{method.icon || "💳"}</span>
-                      <div className="flex-1">
-                        <p className="font-body text-sm font-medium text-charcoal">
-                          {method.label}
-                        </p>
-                        <p className="font-body text-xs text-charcoal-light">
-                          {method.description}
-                        </p>
-                        {method.key === "bank" && method.accountDetails && (
-                          <p className="font-body text-xs text-terracotta-600 mt-1 font-mono">
-                            {method.accountDetails}
-                          </p>
-                        )}
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="radio"
+                          name="shipping"
+                          value={opt.k}
+                          checked={form.shippingOption === opt.k}
+                          onChange={() => upd("shippingOption", opt.k)}
+                          className="accent-terracotta-500"
+                        />
+                        <span className="font-body text-sm text-charcoal">
+                          {opt.l}
+                        </span>
                       </div>
+                      <span
+                        className={`font-body text-sm font-semibold ${
+                          opt.p === "Free" ? "text-sage-500" : "text-charcoal"
+                        }`}
+                      >
+                        {opt.p}
+                      </span>
                     </label>
                   ))}
                 </div>
-                {(form.paymentMethod === "jazzcash" ||
-                  form.paymentMethod === "easypaisa") && (
-                  <div className="bg-terracotta-50 border border-terracotta-200 p-4">
-                    <p className="font-body text-sm text-terracotta-700">
-                      After placing your order, you'll receive payment
-                      instructions via WhatsApp.
-                    </p>
-                  </div>
-                )}
-                <button
-                  onClick={placeOrder}
-                  disabled={loading}
-                  className={`w-full flex items-center justify-center gap-2 py-4 font-body text-xs tracking-widest uppercase font-medium transition-all ${
-                    loading
-                      ? "bg-charcoal-light text-ivory-300 cursor-wait"
-                      : "bg-charcoal text-ivory-100 hover:bg-terracotta-500"
-                  }`}
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-ivory-300 border-t-ivory-100 rounded-full animate-spin" />{" "}
-                      Placing Order...
-                    </>
-                  ) : (
-                    `Place Order — ${formatPrice(orderTotal)}`
-                  )}
-                </button>
-                <p className="text-center font-body text-xs text-charcoal-light">
-                  By placing your order you agree to our Terms & Privacy Policy
-                </p>
               </div>
-            )}
-          </div>
 
-          {/* Order Summary */}
-          <div>
-            <div className="bg-ivory-50 border border-ivory-200 p-6 sticky top-24">
-              <p className="font-body text-xs tracking-widest uppercase text-charcoal-light mb-5">
-                Order Summary
-              </p>
-              <div className="space-y-4 mb-6">
-                {items.map((item) => {
-                  const price = item.product.salePrice || item.product.price;
-                  return (
-                    <div key={item.key} className="flex gap-3">
-                      <div className="relative w-14 h-16 flex-shrink-0">
-                        <img
-                          src={item.color?.image || item.product.images?.[0]}
-                          alt={item.product.name}
-                          className="w-full h-full object-cover"
-                        />
-                        <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-charcoal text-ivory-100 text-[10px] font-body rounded-full flex items-center justify-center">
-                          {item.quantity}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-body text-xs font-medium text-charcoal leading-snug">
-                          {item.product.name}
-                        </p>
-                        <p className="font-body text-xs text-charcoal-light">
-                          {item.size} · {item.color?.name}
-                        </p>
-                      </div>
-                      <p className="font-body text-xs font-medium text-charcoal">
-                        {formatPrice(price * item.quantity)}
-                      </p>
-                    </div>
-                  );
-                })}
+              {error && (
+                <p className="font-body text-sm text-terracotta-500">{error}</p>
+              )}
+              <button
+                onClick={validateStep1}
+                className="w-full btn-primary flex items-center justify-center gap-2"
+              >
+                Continue to Payment <ArrowRight size={14} />
+              </button>
+            </div>
+          )}
+
+          {/* Step 2: Payment */}
+          {step === 2 && (
+            <div className="bg-ivory-50 border border-ivory-200 p-6 space-y-5">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setStep(1)}
+                  className="text-charcoal-light hover:text-charcoal transition-colors"
+                >
+                  <ArrowLeft size={16} />
+                </button>
+                <h2 className="font-display text-xl text-charcoal">
+                  Payment Method
+                </h2>
               </div>
-              <div className="space-y-3 pt-4 border-t border-ivory-200">
-                <div className="flex justify-between">
-                  <span className="font-body text-sm text-charcoal-light">
-                    Subtotal
-                  </span>
-                  <span className="font-body text-sm text-charcoal">
-                    {formatPrice(cartTotal)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-body text-sm text-charcoal-light">
-                    Shipping
-                  </span>
-                  <span
-                    className={`font-body text-sm ${
-                      cartTotal >= freeThreshold
-                        ? "text-sage-400"
-                        : "text-charcoal"
+
+              <div className="space-y-2">
+                {paymentMethods.map((method) => (
+                  <label
+                    key={method.key}
+                    className={`flex items-start gap-4 p-4 border cursor-pointer transition-all ${
+                      form.paymentMethod === method.key
+                        ? "border-charcoal bg-ivory-100"
+                        : "border-ivory-300 hover:border-ivory-400"
                     }`}
                   >
-                    {cartTotal >= freeThreshold
-                      ? "Free"
-                      : formatPrice(shippingCost)}
-                  </span>
-                </div>
-                {couponDiscount > 0 && (
-                  <div className="flex justify-between">
-                    <span className="font-body text-sm text-sage-500">
-                      Coupon ({couponCode})
-                    </span>
-                    <span className="font-body text-sm text-sage-500">
-                      -{formatPrice(couponDiscount)}
+                    <input
+                      type="radio"
+                      name="payment"
+                      value={method.key}
+                      checked={form.paymentMethod === method.key}
+                      onChange={() => upd("paymentMethod", method.key)}
+                      className="accent-terracotta-500 mt-0.5"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">
+                          {PAYMENT_ICONS[method.key] || "💳"}
+                        </span>
+                        <span className="font-body text-sm font-medium text-charcoal">
+                          {method.label}
+                        </span>
+                        {method.key === "stripe" && (
+                          <span className="text-[9px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+                            Secure
+                          </span>
+                        )}
+                      </div>
+                      {method.description && (
+                        <p className="font-body text-xs text-charcoal-light mt-0.5">
+                          {method.description}
+                        </p>
+                      )}
+                      {method.key === "bank" &&
+                        method.accountDetails &&
+                        form.paymentMethod === "bank" && (
+                          <div className="mt-2 p-3 bg-ivory-200 rounded text-xs font-mono text-charcoal">
+                            {method.accountDetails}
+                          </div>
+                        )}
+                      {method.key === "stripe" &&
+                        form.paymentMethod === "stripe" && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <img
+                              src="https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg"
+                              alt="Stripe"
+                              className="h-5 opacity-60"
+                            />
+                            <span className="text-xs text-charcoal-light">
+                              You'll be redirected to Stripe's secure checkout
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+
+              <div>
+                <label className="font-body text-xs text-charcoal-light block mb-1.5">
+                  Order Notes (optional)
+                </label>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => upd("notes", e.target.value)}
+                  rows={2}
+                  placeholder="Any special instructions..."
+                  className={`${inp} resize-none`}
+                />
+              </div>
+
+              {error && (
+                <p className="font-body text-sm text-terracotta-500">{error}</p>
+              )}
+
+              <button
+                onClick={placeOrder}
+                disabled={placing}
+                className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-60"
+              >
+                {placing ? (
+                  <>
+                    <Loader size={14} className="animate-spin" />{" "}
+                    {form.paymentMethod === "stripe"
+                      ? "Redirecting to Stripe..."
+                      : "Placing Order..."}
+                  </>
+                ) : form.paymentMethod === "stripe" ? (
+                  <>
+                    <CreditCard size={14} /> Pay £
+                    {(finalTotal / 100).toFixed(2)} with Card
+                  </>
+                ) : (
+                  <>Place Order — {formatPrice(finalTotal)}</>
+                )}
+              </button>
+              <p className="text-center font-body text-xs text-charcoal-light">
+                By placing your order you agree to our{" "}
+                <Link href="/" className="underline hover:text-terracotta-500">
+                  Terms & Privacy Policy
+                </Link>
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Order summary */}
+        <div className="lg:col-span-2">
+          <div className="bg-ivory-50 border border-ivory-200 p-5 sticky top-6">
+            <h3 className="font-body text-xs tracking-widest uppercase text-charcoal-light mb-4">
+              Order Summary
+            </h3>
+
+            <div className="space-y-3 mb-4 max-h-60 overflow-y-auto">
+              {cartItems.map((item) => {
+                const price = item.product.salePrice || item.product.price;
+                return (
+                  <div key={item.key} className="flex items-center gap-3">
+                    <div className="relative">
+                      <img
+                        src={item.color?.image || item.product.images?.[0]}
+                        alt={item.product.name}
+                        className="w-12 h-14 object-cover rounded"
+                      />
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-charcoal text-ivory-100 rounded-full flex items-center justify-center text-[9px] font-bold">
+                        {item.quantity}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-body text-xs font-medium text-charcoal truncate">
+                        {item.product.name}
+                      </p>
+                      <p className="font-body text-[10px] text-charcoal-light">
+                        {item.size} · {item.color?.name || "Default"}
+                      </p>
+                    </div>
+                    <span className="font-body text-sm text-charcoal">
+                      {formatPrice(price * item.quantity)}
                     </span>
                   </div>
-                )}
-                <div className="flex justify-between pt-3 border-t border-ivory-200">
-                  <span className="font-body text-sm font-semibold text-charcoal">
-                    Total
-                  </span>
-                  <span className="font-body text-base font-semibold text-charcoal">
-                    {formatPrice(orderTotal)}
-                  </span>
+                );
+              })}
+            </div>
+
+            {/* Coupon */}
+            <div className="border-t border-ivory-200 pt-4 mb-4">
+              {!coupon.applied ? (
+                <div className="flex gap-2">
+                  <input
+                    value={coupon.code}
+                    onChange={(e) =>
+                      setCoupon((c) => ({
+                        ...c,
+                        code: e.target.value.toUpperCase(),
+                        error: "",
+                      }))
+                    }
+                    onKeyDown={(e) => e.key === "Enter" && applyCoupon()}
+                    placeholder="Coupon code"
+                    className={`${inp} flex-1 py-2 text-xs`}
+                  />
+                  <button
+                    onClick={applyCoupon}
+                    disabled={coupon.loading}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-charcoal text-ivory-100 text-xs font-body hover:bg-terracotta-500 transition-colors disabled:opacity-60"
+                  >
+                    {coupon.loading ? (
+                      <Loader size={12} className="animate-spin" />
+                    ) : (
+                      <Tag size={12} />
+                    )}{" "}
+                    Apply
+                  </button>
                 </div>
+              ) : (
+                <div className="flex items-center justify-between bg-sage-50 border border-sage-200 px-3 py-2 rounded">
+                  <span className="font-body text-xs text-sage-600 font-medium">
+                    ✓ {coupon.code} applied
+                  </span>
+                  <button
+                    onClick={() =>
+                      setCoupon({
+                        code: "",
+                        discount: 0,
+                        applied: false,
+                        loading: false,
+                        error: "",
+                      })
+                    }
+                  >
+                    <X size={14} className="text-sage-500" />
+                  </button>
+                </div>
+              )}
+              {coupon.error && (
+                <p className="font-body text-xs text-terracotta-500 mt-1">
+                  {coupon.error}
+                </p>
+              )}
+            </div>
+
+            {/* Totals */}
+            <div className="space-y-2 text-sm font-body border-t border-ivory-200 pt-4">
+              <div className="flex justify-between text-charcoal-light">
+                <span>Subtotal</span>
+                <span>{formatPrice(cartTotal)}</span>
+              </div>
+              <div className="flex justify-between text-charcoal-light">
+                <span>Shipping</span>
+                <span className={shippingCost === 0 ? "text-sage-500" : ""}>
+                  {shippingCost === 0 ? "Free" : formatPrice(shippingCost)}
+                </span>
+              </div>
+              {coupon.discount > 0 && (
+                <div className="flex justify-between text-sage-500">
+                  <span>Discount ({coupon.code})</span>
+                  <span>-{formatPrice(coupon.discount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between font-semibold text-charcoal text-base pt-2 border-t border-ivory-200">
+                <span>Total</span>
+                <span className="text-terracotta-500">
+                  {formatPrice(finalTotal)}
+                </span>
               </div>
             </div>
           </div>
         </div>
-      )}
+      </div>
     </div>
+  );
+}
+
+export default function CheckoutPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[50vh] flex items-center justify-center">
+          <Loader size={24} className="animate-spin text-terracotta-500" />
+        </div>
+      }
+    >
+      <CheckoutContent />
+    </Suspense>
   );
 }
